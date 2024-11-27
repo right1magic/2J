@@ -1,4 +1,4 @@
-# 2J_DECODER
+# 2J_DJ
 2J팀의 Decoder개발 깃허브입니다.
 
 ## 프로그램 소개
