@@ -27,6 +27,9 @@ while True:
 # 결과 리스트 초기화
 results = []
 
+#결과를 저장할 리스트
+results = []
+
 # 파일 분석 시작
 for file in TARGET_FILES:
     if os.path.isfile(file):
