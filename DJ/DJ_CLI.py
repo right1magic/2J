@@ -1,100 +1,102 @@
 import os
 import time
 import re
-import pandas as pd 
-from tabulate import tabulate
+import pandas as pd
+import tabulate as tb
 
-#사용자 입력
-TARGET_FILES = []
-while True:
-    user_input = input("분석할 파일명을 입력하세요 (파일을 모두 입력했다면 'q' 입력): ").strip()
 
-    #'q' 입력으로 종료
-    if user_input.lower() == 'q': 
-        break
-    
-    #"경로로 복사"한 파일도 가능하도록 정제
-    sanitized_input = user_input.strip("\"'")
+def collect_target_files():
+    """사용자로부터 분석할 파일명을 입력받아 리스트로 반환"""
+    target_files = []
+    while True:
+        user_input = input("분석할 파일명을 입력하세요 (파일을 모두 입력했다면 'q' 입력): ").strip()
+        if user_input.lower() == 'q': 
+            break
 
-    #경로 형식 "//,/,\"에 관계없이 디코딩 가능하도록 정규화
-    normalized_path = os.path.normpath(sanitized_input)
+        sanitized_input = user_input.strip("\"'")
+        normalized_path = os.path.normpath(sanitized_input)
 
-    if os.path.isfile(normalized_path): 
-        TARGET_FILES.append(normalized_path)
-    else:
-        print("유효한 파일명을 입력해주세요.")
+        if os.path.isfile(normalized_path): 
+            target_files.append(normalized_path)
+        else:
+            print("유효한 파일명을 입력해주세요.")
+    return target_files
 
-# 결과 리스트 초기화
-results = []
 
-#결과를 저장할 리스트
-results = []
+def extract_data(content, patterns):
+    """지정된 패턴들을 기반으로 데이터를 추출"""
+    extracted = {}
+    for key, pattern in patterns.items():
+        match = re.search(pattern, content)
+        extracted[key] = match.group() if match else "None"
+    return extracted
 
-# 파일 분석 시작
-for file in TARGET_FILES:
-    if os.path.isfile(file):
+
+def decode_and_extract(file_content, encoding, patterns):
+    """파일 내용을 특정 인코딩으로 디코딩하고 데이터 추출"""
+    try:
+        decoded_content = file_content.decode(encoding, errors='ignore')
+        return extract_data(decoded_content, patterns)
+    except Exception as e:
+        print(f"Error decoding with {encoding}: {e}")
+        return None
+
+
+def process_files(file_paths, patterns):
+    """파일 리스트를 처리하여 결과 리스트 생성"""
+    results = []
+    for file in file_paths:
+        if not os.path.isfile(file):
+            print(f"File {file} does not exist.")
+            continue
+
         file_name = os.path.basename(file)
-
-        # 파일 수정 시각
         modification_time = time.ctime(os.path.getmtime(file))
 
-        # 파일 읽기
         with open(file, 'rb') as f:
             file_content = f.read()
 
-            #16진수 데이터로 변환하여 텍스트로 디코딩
+            for encoding in ['euc-kr', 'utf-8']:
+                extracted_data = decode_and_extract(file_content, encoding, patterns)
+                if extracted_data and "None" not in extracted_data.values():
+                    results.append({"File Name": file_name, "Last Modified": modification_time, **extracted_data})
+            
+            # Hex decoding
             hex_string = file_content.hex()
-            bytes_data = bytes.fromhex(hex_string)
+            try:
+                hex_decoded_content = bytes.fromhex(hex_string).decode('utf-8', errors='ignore')
+                extracted_data = extract_data(hex_decoded_content, patterns)
+                if extracted_data and "None" not in extracted_data.values():
+                    results.append({"File Name": file_name, "Last Modified": modification_time, **extracted_data})
+            except Exception as hex_error:
+                print(f"Error decoding hex to string: {hex_error}")
 
-            try: 
-                #euc-kr 디코딩 시도
-                decoded_content = bytes_data.decode('euc-kr', errors='ignore')
-            except Exception as euc_kr_error:
-                print(f"Error decoding with euc-kr: {euc_kr_error}")
+    # 중복 제거
+    unique_results = []
+    seen = set()
+    for result in results:
+        result_tuple = tuple(result.items())
+        if result_tuple not in seen:
+            seen.add(result_tuple)
+            unique_results.append(result)
 
-                try:
-                    #euc-kr 실패 시 utf-8로 디코딩 시도
-                    decoded_content = bytes_data.decode('utf-8', errors='ignore')
-                except Exception as utf8_error:
-                    print(f"Error decoding with utf-8: {utf8_error}")
+    return unique_results
 
-                    #두 경우 모두 실패 시 hex to string으로 변환
-                    hex_as_string = bytes.fromhex(hex_string).decode('euc-kr', error='ignore')
 
-            # 데이터 추출
-            student_id = "None"
-            match = re.search(r'\d{5,10}', decoded_content)
+if __name__ == "__main__":
+    # 데이터 추출에 사용할 패턴 정의
+    PATTERNS = {
+        "Student ID": r'\d{5,10}',
+        "Name": r'[가-힣]{3,}',
+        "Birth": r'\d{13}'
+    }
 
-            if match:
-                student_id = match.group()
-            else:
-                "None"
+    # 사용자로부터 파일 목록 수집
+    target_files = collect_target_files()
 
-            name = re.search(r'[가-힣]{3,}', decoded_content)
-            name = name.group() if name else "None"
+    # 파일 처리 및 결과 생성
+    processed_results = process_files(target_files, PATTERNS)
 
-            birth = re.search(r'\d{13}', decoded_content)
-            birth = birth.group() if birth else "None"
-
-            # 결과 리스트에 추가
-            results.append({
-                "File Name": file_name,
-                "Last Modified": modification_time,
-                "Student ID": student_id,
-                "Name": name,
-                "Birth": birth
-            })
-    else:
-        print(f"File {file} does not exist.")
-
-#pandas DataFrame 생성
-df = pd.DataFrame(results)
-
-#tabulate 없는 버전
-#print(df)
-
-#표 출력 (tabulate 사용)
-print(tabulate(df, headers="keys", tablefmt="grid")) 
-
-#결과를 CSV 파일로 저장 (선택)
-df.to_csv("output.csv", index=False)
+    # 결과 DataFrame 생성 및 출력
+    df = pd.DataFrame(processed_results)
+    print(tb.tabulate(df, headers='keys', tablefmt='psql'))
